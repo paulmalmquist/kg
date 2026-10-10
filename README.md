@@ -34,6 +34,7 @@ The Sites helper configures hosted resources from `.openai/hosting.json`; `d1` i
 - `sql/`: BigQuery discovery and foundation templates. Apply only after source mapping and ACL design.
 - `tests/`: lifecycle, adversarial, and adapter tests, including the executable evaluation fixture.
 - `public/handoff.md`: complete work-environment transfer prompt.
+- `docs/red-team-review.md`: red-team findings, repairs, open improvements, and architecture recommendation (2026-10-10).
 
 ## Try it
 1. In Explore, select **Takt time & its consumers**.
