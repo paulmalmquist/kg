@@ -37,5 +37,5 @@ export function seedState(): State {
     ['a_build','m_fpy','CONSUMES','a_build'],['a_quality','m_fpy','CONSUMES','a_quality'],['a_quality','m_ncr','CONSUMES','a_quality'],['m_cycle','dbt_cycle','IMPLEMENTED_BY','m_cycle'],['m_ncr','dbt_ncr','IMPLEMENTED_BY','m_ncr'],
     ['test_123','lot_17','USES_LOT','test_123'],['test_123','d_test','CONTEXT_IN','d_test'],['test_123','f_inspect','RECORDED_IN','test_123']
   ];
-  return {schemaVersion:1,records,edges:triples.map(([from,to,relation,evidenceId],i)=>({id:`edge_${i}`,from,to,relation,evidenceId,evidenceVersion:1})),tombstones:[],index:{generation:1,builtAt:new Date().toISOString(),ids:records.filter(r=>r.status==='approved').map(r=>r.id)},runs:[],audit:[],evaluations:[]};
+  return {schemaVersion:2,records,edges:triples.map(([from,to,relation,evidenceId],i)=>({id:`edge_${i}`,from,to,relation,evidenceId,evidenceVersion:1})),tombstones:[],index:{generation:1,builtAt:new Date().toISOString(),ids:records.filter(r=>r.status==='approved').map(r=>r.id)},runs:[],audit:[],evaluations:[]};
 }

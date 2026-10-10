@@ -101,6 +101,20 @@ CREATE TABLE IF NOT EXISTS `PROJECT_ID.DATASET_ID.decision_events` (
 -- Consider IVF for single-query interactive requests after the corpus is large
 -- enough for index population. Verify actual use in job metadata. Index creation
 -- is NOT embedding generation and does not preserve source ACLs by itself.
+--
+-- Checked against docs.cloud.google.com/bigquery/docs/vector-index on 2026-10-10:
+-- * A base-table filter is a true pre-filter only on STORED columns; any other
+--   predicate effectively becomes a post-filter, which can return fewer than
+--   top_k rows, potentially zero. The provider's status/is_current/model filter
+--   therefore needs these stored columns.
+-- * Stored columns are NOT used when the table has a row-level access policy or
+--   the column has a policy tag. The source-equivalent RLS required above turns
+--   these filters back into post-filters: measure underfill per permission
+--   profile and over-fetch or brute-force rather than loosening access.
+-- * Every embedding in the indexed column must have the same dimension. Keep one
+--   embedding model (or one dimension) per table rather than mixing models here.
+-- * Tables under 10 MB do not populate the index; queries fall back to brute force.
 CREATE VECTOR INDEX IF NOT EXISTS chunks_embedding_idx
 ON `PROJECT_ID.DATASET_ID.chunks`(embedding)
+STORING(status, is_current, embedding_model)
 OPTIONS(index_type = 'IVF', distance_type = 'COSINE');

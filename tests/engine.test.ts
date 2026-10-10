@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {initialize,evaluate,createRun,mutateRecord,rebuild,viewState,transitionRun,authorizedGraph,hashText,downstreamImpact} from '../lib/atlas-engine.ts';
-test('the executable 12-case fixture passes',()=>{const r=evaluate();assert.equal(r.checks.length,12);assert.deepEqual(r.checks.filter(c=>!c.passed),[]);});
+test('the executable 16-case fixture passes',()=>{const r=evaluate();assert.equal(r.checks.length,16);assert.deepEqual(r.checks.filter(c=>!c.passed),[]);});
 test('SHA-256 hashes and revision spans are reproducible',async()=>{const s=await initialize();const run=createRun(s,'analyst','Takt time','graph','tester');for(const c of run.citations){assert.equal(c.hash,await hashText(c.text));assert.equal(c.end-c.start,c.text.length);assert.equal(c.hash.length,64);}});
 test('a deletion scrubs stored dependent run text and survives rebuild',async()=>{const s=await initialize();const run=createRun(s,'steward','Takt time','graph','tester');const id=run.citations[0].id;mutateRecord(s,'steward',id,'delete','tester');rebuild(s,'steward','tester');assert.equal(s.index.ids.includes(id),false);assert.equal(run.redacted,true);assert.equal(run.citations.length,0);assert.equal(run.answer,'');assert.deepEqual(s.records.find(r=>r.id===id)!.revisions,[]);assert.ok(!viewState(s,'steward').runs.some(r=>r.id===run.id));});
 test('current authorization filters historical runs and graph endpoints',async()=>{const s=await initialize();const run=createRun(s,'analyst','Takt time','graph','tester');mutateRecord(s,'steward','m_takt','revoke','tester');assert.ok(!viewState(s,'analyst').runs.some(r=>r.id===run.id));assert.ok(authorizedGraph(s,'analyst').every(e=>e.from!=='m_takt'&&e.to!=='m_takt'));});
