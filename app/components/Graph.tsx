@@ -4,15 +4,15 @@ import { Maximize2, Minus, Plus, Focus } from 'lucide-react';
 import type {EvidenceRecord,Edge} from '../../lib/atlas-types';
 const colors:Record<string,string>={metric:'#b79cff',model:'#74baff',app:'#57d7b0',document:'#e2c58e',decision:'#eb9ec7',test:'#f89c85',lot:'#8bcec8'};
 export function connected(records:EvidenceRecord[],edges:Edge[],focus:string,depth=2){const seen=new Set([focus]);let frontier=[focus];for(let k=0;k<depth;k++){const next:string[]=[];for(const e of edges){if(frontier.includes(e.from)&&!seen.has(e.to)){seen.add(e.to);next.push(e.to);}if(frontier.includes(e.to)&&!seen.has(e.from)){seen.add(e.from);next.push(e.from);}}frontier=next;}return records.filter(r=>seen.has(r.id)&&r.status==='approved');}
-export default function Graph({records,edges,focus,onSelect,onFocus,large=false}:{records:EvidenceRecord[];edges:Edge[];focus:string;onSelect:(id:string)=>void;onFocus:(id:string)=>void;large?:boolean}){
+export default function Graph({records,edges,focus,onSelect,onFocus}:{records:EvidenceRecord[];edges:Edge[];focus:string;onSelect:(id:string)=>void;onFocus:(id:string)=>void}){
   const [zoom,setZoom]=useState(1);
   const visible=useMemo(()=>connected(records,edges,focus),[records,edges,focus]);
   const nodes=useMemo(()=>{const rest=visible.filter(r=>r.id!==focus);return visible.map(r=>{if(r.id===focus)return {...r,x:400,y:245};const i=rest.findIndex(x=>x.id===r.id);const angle=(i/rest.length)*Math.PI*2-Math.PI/2;return {...r,x:400+Math.cos(angle)*285,y:245+Math.sin(angle)*173};});},[visible,focus]);
   const byId=new Map(nodes.map(n=>[n.id,n]));
-  return <section className={`graph-panel ${large?'graph-large':''}`}>
+  return <section className="graph-panel">
     <div className="panel-header"><div><span className="eyebrow">CONNECTED CONTEXT</span><h2>Follow the evidence</h2></div><span className="subtle">{nodes.length} objects · {edges.filter(e=>byId.has(e.from)&&byId.has(e.to)).length} relationships</span></div>
     <div className="graph-tools"><select aria-label="Focus graph on an object" value={focus} onChange={e=>{onFocus(e.target.value);setZoom(1);}}>{records.filter(r=>r.status==='approved').map(r=><option key={r.id} value={r.id}>{r.title}</option>)}</select><div className="zoom-tools"><button aria-label="Zoom out" onClick={()=>setZoom(z=>Math.max(.75,z-.15))}><Minus size={15}/></button><button aria-label="Reset zoom" onClick={()=>setZoom(1)}><Focus size={16}/></button><button aria-label="Zoom in" onClick={()=>setZoom(z=>Math.min(1.6,z+.15))}><Plus size={15}/></button></div></div>
-    <svg className="constellation" viewBox="0 0 800 500" role="img" aria-label="Interactive knowledge graph. Select a node to inspect its evidence.">
+    <svg className="constellation" viewBox="0 0 800 500" role="group" aria-label="Interactive knowledge graph. Select a node to inspect its evidence.">
       <defs><radialGradient id="nebula"><stop offset="0" stopColor="#8060ce" stopOpacity=".19"/><stop offset="1" stopColor="#8060ce" stopOpacity="0"/></radialGradient><filter id="glow"><feGaussianBlur stdDeviation="7"/></filter><marker id="arrow" viewBox="0 0 10 10" refX="18" refY="5" markerWidth="4" markerHeight="4" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#6c6687"/></marker></defs>
       <circle cx="400" cy="245" r="230" fill="url(#nebula)"/>
       {Array.from({length:68},(_,i)=><circle key={`s${i}`} cx={(i*173+37)%800} cy={(i*97+19)%500} r={i%7===0?1.2:.65} fill="#bcc1e1" opacity={.1+(i%4)*.08}/>)}
@@ -25,6 +25,6 @@ export default function Graph({records,edges,focus,onSelect,onFocus,large=false}
       </g>)}
       </g>
     </svg>
-    <div className="graph-footer"><div className="legend">{['metric','model','app','document','decision'].map(k=><span key={k}><i style={{background:colors[k]}}/>{k}</span>)}</div><span className="subtle"><Maximize2 size={12}/> Select any node</span></div>
+    <div className="graph-footer"><div className="legend">{['metric','model','app','document','decision','test','lot'].filter(k=>nodes.some(n=>n.kind===k)).map(k=><span key={k}><i style={{background:colors[k]}}/>{k}</span>)}</div><span className="subtle"><Maximize2 size={12}/> Select any node</span></div>
   </section>;
 }

@@ -8,11 +8,11 @@ Implement Pattern B using the existing GCP stack: original source systems own bu
 ## What already works
 - Private app authentication and per-user persistent D1 workspace state, with compare-and-swap revisions to prevent lost updates.
 - 22 synthetic evidence objects; exact source revisions, SHA-256 hashes and spans.
-- Keyword retrieval, alias expansion, permission-filtered graph traversal, directed dependency impact function.
+- Keyword retrieval with disclosed matched terms, alias expansion, permission-filtered graph traversal, and directed dependency impact from an explicit or disclosed inferred root, with explicit incompleteness reasons (access scope, hop limit, stale relationships).
 - Provisional-claim exclusion, revision inspection, source revision publication, access restriction, retirement, deletion, and rebuild.
-- Tombstones prevent resurrection; deletion scrubs dependent answer text; historical runs are reauthorized on read.
-- Investigation → proposal → steward approval/rejection → recorded outcome. No operational actions.
-- 12-case in-app evaluation fixture and Node tests for lifecycle, stale approvals, role checks, and the BigQuery adapter.
+- Tombstones prevent resurrection; deletion scrubs dependent answer text and removes graph references and relationships; historical runs and every non-cited reference inside them are reauthorized on read. Retirement keeps decision history visible but blocks approval.
+- Investigation → proposal → steward approval/rejection → recorded outcome. No operational actions. Runs capture ranked candidates, relationship versions, and retrieval configuration; approval is refused when any of those inputs changed. Proposer and approver can be the same person in the pilot; production needs separation of duties.
+- 16-case in-app evaluation fixture and Node tests for lifecycle, stale approvals, role checks, an adversarial suite (tests/redteam.test.ts), and the BigQuery adapter.
 - A server-side BigQuery vector query adapter in production/bigquery-provider.ts, tested using mocked REST responses. It is not connected to live GCP.
 
 ## Discover first; do not guess names
@@ -23,13 +23,13 @@ Implement Pattern B using the existing GCP stack: original source systems own bu
 5. Start with three real questions: approved metric definition; downstream consumers and change impact; decision rationale and evidence. Confirm expected answers with a domain owner.
 
 ## Replace the pilot boundary
-- Keep the UI contracts, but replace /api/workspace's synthetic snapshot loading with a repository/provider layer. The current D1 JSON snapshot is deliberately a bounded pilot store (250 runs, 5,000 audit events), not the production warehouse design.
+- Keep the UI contracts, but replace /api/workspace's synthetic snapshot loading with a repository/provider layer. The current D1 JSON snapshot is deliberately a bounded pilot store (250 runs, 5,000 audit events, 1.8 MB budget under D1's 2 MB row limit, with access changes exempt), not the production warehouse design. Every write rewrites the whole snapshot, so concurrency is one writer per workspace.
 - Use sql/bigquery-foundation.sql as a schema proposal, not an instruction to create duplicate objects. Reuse existing authoritative models and catalog IDs.
 - Map source ACLs explicitly. Replace selectable role personas with server-verified SSO subject, groups, attributes, policy epoch, and source entitlements. Identity and permission data must not come from user-supplied JSON.
 - Wire BigQueryProvider only after a trusted server-side getSession resolver supplies delegated credentials for the effective user and source-equivalent RLS has been verified on every referenced table. A shared privileged service account plus a subject string does not reproduce per-user authorization.
 - No GCP tokens, service-account keys, raw source ACLs, or unrestricted corpus in client bundles. Keep embedding generation and vector search server-side. Use approved regional endpoints.
-- The adapter binds query values, validates identifiers and dimensions, caps top-k and bytes billed, disables query-result caching, polls bounded jobs, and rejects incomplete pages. It returns job IDs for usage inspection. It is a starter; add cancellation, workload budgets, and observability appropriate to your environment.
-- The SQL adapter excludes tombstones and joins candidates against current source revisions. Selective filtering may reduce recall or index use. Measure this with real policies; do not loosen access controls to improve recall.
+- The adapter binds query values, validates identifiers and dimensions, caps top-k and bytes billed, disables query-result caching, requests a server-side jobTimeoutMs, polls bounded jobs, cancels any job it abandons (best effort; cancelled jobs may still incur cost), rejects incomplete pages, and reports underfilled top-k. It returns job IDs for usage inspection; getQueryResults does not return totalBytesBilled, so read billing and vectorSearchStatistics with jobs.get. If the initial jobs.query response is lost, the job ID is unknown and only jobTimeoutMs bounds it; use jobs.insert with client-assigned job IDs if that matters. It still needs workload budgets and observability appropriate to your environment.
+- The SQL adapter excludes tombstones and joins candidates against current source revisions. Those joins are post-filters and can underfill top-k. Base-table filters are pre-filters only on STORED index columns, and BigQuery ignores stored columns on tables with row-level access policies, so the required RLS makes every filter a post-filter. Measure underfill per permission profile; over-fetch or use brute force for small corpora; do not loosen access controls to improve recall. All embeddings in one indexed column must share a dimension.
 
 ## Ingestion and knowledge lifecycle
 Use source-specific connectors with durable checkpoints, immutable source event IDs, per-object revision ordering, idempotent ingestion, and periodic full reconciliation. ACL changes and deletion events have priority over normal indexing. A content hash does not replace source sequence/version ordering. Keep authoritative revocation decisions on a query-time path; define maximum tolerated revocation latency and fail closed when entitlement freshness exceeds it.
@@ -41,7 +41,7 @@ Treat retirement, revocation, hold, and erasure separately. Purge derived summar
 ## Retrieval and graph
 Build a common provider contract returning evidence ID, source revision, span, hash, score method, source URI, retrieval time, policy epoch, and query job ID. Route exact lookups to SQL, lexical retrieval to keyword indexes, semantic retrieval to approved embeddings, graph traversal to explicit relationships, and current operational state to live authorized reads.
 
-The synthetic app performs no semantic vector search, reranking, or LLM generation. Do not relabel lexical scores as semantic similarity. Add a real embedding provider and evaluation baseline before enabling a vector mode. Core BigQuery Graph reached GA August 31, 2026; verify reservation and feature requirements in the target environment. Use ISO GQL/SQL-PGQ terminology; BigQuery vector indexes are IVF or TreeAH.
+The synthetic app performs no semantic vector search, reranking, or LLM generation. Do not relabel lexical scores as semantic similarity. Add a real embedding provider and evaluation baseline before enabling a vector mode. Core BigQuery Graph reached GA August 31, 2026. GQL queries require an Enterprise or Enterprise Plus reservation (on-demand projects can only use GRAPH_EXPAND); verify reservation and feature requirements in the target environment. Use ISO GQL/SQL-PGQ terminology; BigQuery vector indexes are IVF or TreeAH.
 
 When adding an LLM, retrieved documents are untrusted data, not tool instructions. Authorize content before it reaches the model. Tools must remain separately authorized. Keep generated explanations distinct from quoted evidence; unsupported assertions must abstain. Candidate extracted claims can be stored as provisional; publishing accepted domain claims needs the chosen review policy, not blanket manual approval of every deterministic row.
 

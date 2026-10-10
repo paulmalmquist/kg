@@ -8,6 +8,9 @@ export type QueryParameter={name:string;parameterType:unknown;parameterValue:unk
 type QueryResult={jobComplete?:boolean;jobReference?:{jobId:string;location?:string};rows?:{f:{v:string}[]}[];pageToken?:string;errors?:unknown[];totalBytesProcessed?:string;totalBytesBilled?:string;cacheHit?:boolean};
 export type BigQueryConfig={project:string;dataset:string;location:string;embeddingModel:string;dimensions:number;maximumBytesBilled:string};
 export type RetrievedEvidence={evidence_id:string;revision:number;chunk_id:string;content:string;source_uri:string;content_hash:string;distance:number};
+/** Client wait for one retrieval, and the server-side stop requested for the job (best effort per the BigQuery API). */
+export const CLIENT_DEADLINE_MS=20000;
+export const JOB_TIMEOUT_MS=15000;
 export class BigQueryProvider {
   private config:BigQueryConfig;
   private getSession:()=>Promise<AuthorizedSession>;
@@ -45,13 +48,29 @@ export class BigQueryProvider {
     const params:QueryParameter[]=[{name:'model',parameterType:{type:'STRING'},parameterValue:{value:this.config.embeddingModel}},{name:'vector',parameterType:{type:'ARRAY',arrayType:{type:'FLOAT64'}},parameterValue:{arrayValues:vector.map(v=>({value:String(v)}))}},{name:'top_k',parameterType:{type:'INT64'},parameterValue:{value:String(topK)}}];
     const base=`https://bigquery.googleapis.com/bigquery/v2/projects/${this.config.project}`;
     const headers={Authorization:`Bearer ${session.accessToken}`,'Content-Type':'application/json'};
-    const signal=AbortSignal.timeout(20000);
+    const signal=AbortSignal.timeout(CLIENT_DEADLINE_MS);
+    // Fails closed on any reported error, including warnings on a job that may have succeeded.
     const send=async(url:string,init:RequestInit)=>{const r=await this.request(url,{...init,headers,signal});if(!r.ok)throw new Error(`BigQuery request failed (${r.status}).`);const result=await r.json() as QueryResult;if(result.errors?.length)throw new Error('BigQuery rejected the retrieval query.');return result;};
-    let result=await send(`${base}/queries`,{method:'POST',body:JSON.stringify({query:sql,useLegacySql:false,location:this.config.location,parameterMode:'NAMED',queryParameters:params,maximumBytesBilled:this.config.maximumBytesBilled,maxResults:20,timeoutMs:1000,useQueryCache:false,requestId:crypto.randomUUID()})});
-    const job=result.jobReference;let polls=0;
-    while(!result.jobComplete&&job&&polls++<8){result=await send(`${base}/queries/${encodeURIComponent(job.jobId)}?location=${encodeURIComponent(job.location||this.config.location)}&timeoutMs=1000&maxResults=20`,{method:'GET'});}
-    if(!result.jobComplete||result.pageToken)throw new Error('Retrieval did not return a complete result within its bounded request. No partial answer was published.');
-    const evidence=(result.rows??[]).map(row=>JSON.parse(row.f[0].v) as RetrievedEvidence);
-    return {evidence,principal:session.subject,policyEpoch:session.policyEpoch,jobId:job?.jobId??null,bytesProcessed:result.totalBytesProcessed??null,bytesBilled:result.totalBytesBilled??null};
+    // timeoutMs only bounds how long a call waits; the job keeps running (and billing) after it.
+    // So: ask BigQuery to stop the job server-side, and cancel any job this call abandons.
+    let job:QueryResult['jobReference'];let complete=false;
+    try{
+      let result=await send(`${base}/queries`,{method:'POST',body:JSON.stringify({query:sql,useLegacySql:false,location:this.config.location,parameterMode:'NAMED',queryParameters:params,maximumBytesBilled:this.config.maximumBytesBilled,maxResults:20,timeoutMs:1000,jobTimeoutMs:JOB_TIMEOUT_MS,useQueryCache:false,requestId:crypto.randomUUID()})});
+      job=result.jobReference;let polls=0;
+      while(!result.jobComplete&&job&&polls++<8){result=await send(`${base}/queries/${encodeURIComponent(job.jobId)}?location=${encodeURIComponent(job.location||this.config.location)}&timeoutMs=1000&maxResults=20`,{method:'GET'});}
+      complete=!!result.jobComplete;
+      if(!result.jobComplete||result.pageToken)throw new Error('Retrieval did not return a complete result within its bounded request. No partial answer was published.');
+      const evidence=(result.rows??[]).map(row=>JSON.parse(row.f[0].v) as RetrievedEvidence);
+      // Post-filters (current revision, tombstones, row-level policies) can return fewer than topK rows.
+      // getQueryResults does not report totalBytesBilled; read job statistics with jobs.get for billing.
+      return {evidence,requestedTopK:topK,underfilled:evidence.length<topK,principal:session.subject,policyEpoch:session.policyEpoch,jobId:job?.jobId??null,bytesProcessed:result.totalBytesProcessed??null,bytesBilled:result.totalBytesBilled??null};
+    }catch(error){
+      if(job&&!complete)await this.cancel(base,job.jobId,job.location||this.config.location,headers);
+      throw error;
+    }
+  }
+  /** Best effort: jobs.cancel returns immediately and cancelled jobs may still incur some cost. */
+  private async cancel(base:string,jobId:string,location:string,headers:Record<string,string>){
+    try{await this.request(`${base}/jobs/${encodeURIComponent(jobId)}/cancel?location=${encodeURIComponent(location)}`,{method:'POST',headers,signal:AbortSignal.timeout(5000)});}catch{/* the original failure is the error worth reporting */}
   }
 }
